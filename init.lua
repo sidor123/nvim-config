@@ -28,8 +28,8 @@ local map = vim.keymap.set
 map('n', '<Esc>', '<cmd>nohlsearch<CR>')
 map('n', '<leader>e', '<cmd>Neotree toggle left<CR>', { desc = 'Toggle Neo-tree sidebar' })
 map('n', '<leader>E', '<cmd>Neotree toggle current<CR>', { desc = 'Toggle Neo-tree in current window' })
-map('n', '<leader>c', '<cmd>quit<CR>', { desc = 'Close window' })
-map('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Buffer diagnostics' })
+map('n', '<leader>C', '<cmd>quit<CR>', { desc = 'Close window' })
+map('n', '<leader>q', '<cmd>qa<CR>', { desc = 'Quit Neovim' })
 map('t', '<Esc><Esc>', [[<C-\><C-n>]], { desc = 'Exit terminal mode' })
 for _, key in ipairs { 'h', 'j', 'k', 'l' } do
   map('n', '<C-' .. key .. '>', '<C-w>' .. key, { desc = 'Focus adjacent window' })
@@ -42,7 +42,7 @@ vim.api.nvim_create_autocmd('TextYankPost', {
 
 vim.api.nvim_create_autocmd('FileType', {
   group = vim.api.nvim_create_augroup('syntax-highlight', { clear = true }),
-  pattern = { 'c', 'cpp', 'sh', 'diff', 'html' },
+  pattern = { 'c', 'cpp', 'go', 'kotlin', 'sh', 'diff', 'html' },
   callback = function(event)
     local lang = vim.treesitter.language.get_lang(event.match)
     if lang and vim.treesitter.language.add(lang) and vim.treesitter.query.get(lang, 'highlights') then vim.treesitter.start(event.buf, lang) end
@@ -67,9 +67,17 @@ vim.pack.add {
   'https://github.com/folke/todo-comments.nvim',
   'https://github.com/lukas-reineke/indent-blankline.nvim',
   'https://github.com/folke/which-key.nvim',
+  'https://github.com/nvim-lualine/lualine.nvim',
+  'https://github.com/folke/snacks.nvim',
+  'https://github.com/leejh903/codex.nvim',
+  'https://github.com/akinsho/bufferline.nvim',
+  'https://github.com/neovim/nvim-lspconfig',
+  'https://github.com/nvim-treesitter/nvim-treesitter',
 }
 
 vim.cmd.colorscheme 'tokyodark'
+require('nvim-treesitter').setup { install_dir = vim.fn.stdpath 'data' .. '/site' }
+require('nvim-treesitter').install { 'c', 'cpp', 'go', 'kotlin' }
 vim.cmd.highlight 'Comment gui=none'
 require('mini.ai').setup { n_lines = 500 }
 require('mini.surround').setup()
@@ -82,7 +90,74 @@ map('i', '<CR>', function()
   local selected = vim.fn.complete_info({ 'selected' }).selected
   return vim.keycode(selected == -1 and '<C-n><C-y>' or '<C-y>')
 end, { expr = true, replace_keycodes = false })
-require('mini.statusline').setup { use_icons = true }
+require('lualine').setup {
+  options = {
+    theme = 'auto',
+    globalstatus = true,
+    component_separators = { left = '', right = '' },
+    section_separators = { left = '', right = '' },
+    disabled_filetypes = { statusline = { 'alpha', 'neo-tree' } },
+  },
+  sections = {
+    lualine_a = { { 'mode', fmt = function(mode) return ' ' .. mode .. ' ' end } },
+    lualine_b = {
+      { 'branch', icon = '', separator = { right = '' } },
+      { 'filetype', icon_only = true, colored = true, padding = { left = 1, right = 0 } },
+      { 'filename', path = 0, symbols = { modified = ' ●', readonly = ' ', unnamed = '[No Name]' } },
+    },
+    lualine_c = {
+      { 'diagnostics', sources = { 'nvim_diagnostic' }, symbols = { error = ' ', warn = ' ', info = ' ' } },
+    },
+    lualine_x = {},
+    lualine_y = {
+      { 'progress', separator = { left = '' } },
+      { function() return ('%d'):format(vim.fn.line '.') end, icon = '', padding = { left = 1, right = 0 } },
+      { function() return ('%d'):format(vim.fn.col '.') end, icon = '', padding = { left = 0, right = 1 } },
+    },
+    lualine_z = { { function() return ' ' .. os.date '%H:%M' end, separator = { left = '' } } },
+  },
+  extensions = { 'neo-tree', 'quickfix' },
+}
+require('bufferline').setup {
+  options = {
+    mode = 'buffers',
+    separator_style = 'slant',
+    show_buffer_close_icons = false,
+    show_close_icon = false,
+    diagnostics = 'nvim_lsp',
+    offsets = { { filetype = 'neo-tree', text = 'Files', text_align = 'left' } },
+  },
+}
+map('n', '<Tab>', '<cmd>BufferLineCycleNext<CR>', { desc = 'Next buffer' })
+map('n', '<S-Tab>', '<cmd>BufferLineCyclePrev<CR>', { desc = 'Previous buffer' })
+map('n', '<leader>bd', '<cmd>bdelete<CR>', { desc = 'Close buffer' })
+require('snacks').setup { terminal = { enabled = true } }
+local codex_home = vim.env.CODEX_HOME or vim.fn.expand '~/.codex'
+require('codex').setup { socket_paths = { codex_home .. '/ipc/ipc.sock' } }
+require('codex').start()
+require('codex.terminal').setup {
+  split_side = 'right',
+  split_width_percentage = 0.35,
+}
+vim.api.nvim_create_autocmd('TermOpen', {
+  group = vim.api.nvim_create_augroup('codex-terminal-navigation', { clear = true }),
+  callback = function(event)
+    if vim.bo[event.buf].filetype ~= 'snacks_terminal' then return end
+    for key, direction in pairs { h = 'h', j = 'j', k = 'k', l = 'l' } do
+      vim.keymap.set('t', '<C-' .. key .. '>', '<C-\\><C-n><C-w>' .. direction, {
+        buffer = event.buf,
+        desc = 'Move focus ' .. direction,
+      })
+    end
+    vim.keymap.set('t', '<C-q>', '<C-\\><C-n>:q<CR>', {
+      buffer = event.buf,
+      desc = 'Close Codex window',
+    })
+  end,
+})
+map('n', '<leader>cc', '<cmd>Codex<CR>', { desc = 'Toggle Codex terminal' })
+map('n', '<leader>cf', '<cmd>CodexFocus<CR>', { desc = 'Focus Codex terminal' })
+map('x', '<leader>cs', '<cmd>CodexSend<CR>', { desc = 'Send selection to Codex' })
 opt.showmode = false
 
 require 'config.search'
